@@ -58,7 +58,7 @@ class Pawn(Piece):
     def calculate_possible_moves(self, board):
         self.possible_moves.clear()
 
-        # Consider a1 to be the bottom left, then white moves towards row 1 and black moves towards row 8
+        # Consider a1 to be the bottom left, then white moves towards list row 0 and black moves towards list row 7
         direction = None
         start_row = None
         if self.colour == True:
@@ -73,19 +73,27 @@ class Pawn(Piece):
             self.possible_moves[self.space[0]+direction, self.space[1]] = '-'
             
             # if at starting position, then check if two spaces in front is empty
-            if self.space == start_row:
-                if board.get_space(self.space[0]+direction*2, self.space[1]) == '-':
-                    self.possible_moves[self.space[0]+direction*2, self.space[1]] = '-'
+            if self.space == start_row and board.get_space(self.space[0]+direction*2, self.space[1]) == '-':
+                self.possible_moves[self.space[0]+direction*2, self.space[1]] = '-'
         
         # check if there are capturable pieces
-        for x in range(-1, 2, 2):
+        for x in [-1, 1]:
             if board.get_space(self.space[0]+direction, self.space[1]+x) != '-':
                 self.possible_moves[self.space[0]+direction, self.space[1]+x] = board.get_space(self.space[0]+direction, self.space[1]+x)
 
         # check for en passent
-        if board.moves[len(board.moves)-1][0] == Pawn:
-            if board.convert_move_to_array_index(board.moves[len(board.moves)-1]):
-                pass
+        if type(board.moves[-1][0]) == Pawn:
+            initial_space = board.convert_space_to_array_index(board.moves[-1][1])
+            terminal_space = board.convert_space_to_array_index(board.moves[-1][2])
+            if abs(initial_space[0]-terminal_space[0]) == 2 and initial_space[1] == terminal_space[1]:
+                if board.get_space(terminal_space[0], terminal_space[1]-1) is self:
+                    self.possible_moves[terminal_space[0]+direction, terminal_space[1]-1] = board.get_space(terminal_space)
+                elif board.get_space(terminal_space[0], terminal_space[1]+1) is self:
+                    self.possible_moves[terminal_space[0]+direction, terminal_space[1]+1] = board.get_space(terminal_space)
+
+        # define move function
+        # promotion
+                
         
 
 class Rook(Piece):
