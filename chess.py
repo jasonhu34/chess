@@ -46,6 +46,22 @@ class Piece:
         self.colour = color
         self.space = space
         self.possible_moves = {}
+    
+    def move(self, board, ply):
+        # move/capture to space on board
+        # need to implement turns in this functions as well what to do with an invalid ply input
+
+        ply_array = board.convert_space_to_array_index(ply)
+        if ply_array in self.possible_moves:
+            if self.possible_moves[ply_array] != '-':
+                if self.colour:
+                    board.black_pieces.remove(self)
+                else:
+                    board.white_pieces.remove(self)
+            self.space = ply_array
+            board.chess_board[ply_array[0]][ply_array[1]] = self
+        else:
+            return -1
 
 class Pawn(Piece):
 
@@ -91,10 +107,7 @@ class Pawn(Piece):
                 elif board.get_space(terminal_space[0], terminal_space[1]+1) is self:
                     self.possible_moves[terminal_space[0]+direction, terminal_space[1]+1] = board.get_space(terminal_space)
 
-        # define move function
-        # promotion
-                
-        
+        # need to implement pawn promotion
 
 class Rook(Piece):
     
@@ -106,6 +119,19 @@ class Rook(Piece):
     
     def calculate_possible_moves(self, board):
         self.possible_moves.clear()
+        directions = [(0,1), (0,-1), (1,0), (-1,0)]
+
+        # check empty spaces in the cardinal directions
+        for direction in directions:
+            space = self.space
+            while(board.get_space(space[0], space[1]) == '-'):
+                self.possible_moves[space] = '-'
+                space = (space[0]+direction[0], space[1]+direction[1])
+            # hit a piece, add it to the possible moves and stop checking this direction
+            self.possible_moves[space] = board.get_space(space[0], space[1])
+            # need to add a condition checking if the space is out of bounds
+
+
 
 class Bishop(Piece):
     
