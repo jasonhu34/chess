@@ -1,6 +1,15 @@
 """
-Chess brother
+NOTES:
+- I wonder if there is some kind of way to "watch" spaces, such that an object is affiliated with a space if it is watching it and we can return a list of watchers
+- Should modify the Board class such that the __init__ accepts a 2d array so that instantiating differnt board states is possible
+- In the check_board() function, "if king.possible_moves" might need to be removed in order to run in_check()
+- Need to develop end_screen()
+- In ply(), need to restrict moves that expose king to check
+- Implement pawn promotion
+- Need to restrict the king from walking into a check
+- Need to develop test cases
 """
+
 from typing import Union
 
 class Board:
@@ -40,7 +49,6 @@ class Board:
         self.update_all_possible_moves()
 
         # King has a possible move
-        # This might need to be removed, to implement the restriction of certain moves in this block
         if king.possible_moves:
             return
         
@@ -51,33 +59,62 @@ class Board:
 
         # Stalemate condition
         if not targeting_pieces:
-            self.check_stalemate()
+            self.check_end(False)
 
         # Double check without any king moves is a checkmate
         if len(targeting_pieces) != 1:
             self.end_screen("checkmate")
-
-        self.check_checkmate(king, targeting_pieces[0])
+        else:
+            self.in_check(king, targeting_pieces[0])
         
-    def check_checkmate(self, king: object, piece: object) -> bool:
+    def in_check(self, king: object, targetting_piece: object) -> bool:
         """"
-        Maybe vectors could be used here to determine the direction/spaces to check
+        Remove moves from player such that the only moves that can be made are ones that get out of check
         """
-        # Here is where we remove moves from pieces, so that the only moves left are ones that block
-        # In normal play, how to restrict pieces from moving such that king is exposed to a check?
+        # The pieces of the player that is in check
+        pieces = self.white_pieces if king.colour else self.black_pieces
 
-        pass
+        # Establish which direction the targetting piece is relative to the king.
+        direction = [targetting_piece.space[0]-king.space[0], targetting_piece.space[1]-king.space[1]]
+        sign_x = -1 if direction[0] < 0 else 1
+        sign_y = -1 if direction[1] < 0 else 1
+        direction[0] = sign_x if direction[0] else 0
+        direction[1] = sign_y if direction[1] else 0
 
-    def check_stalemate(self) -> bool:
+        # Find the spaces that pieces can land on to get out of check
+        spaces = {targetting_piece.space}
+        if type(targetting_piece) != Knight:
+            while (board.get_space(direction[0], direction[1]) == '-'):
+                spaces.add((king.space[0]+direction[0], king.space[1]+direction[1]))
+                direction[0] += sign_x
+                direction[1] += sign_y
+
+        # Remove moves from all pieces that don't get out of check
+        for piece in pieces:
+            intersect = spaces.intersection(piece.possible_moves)
+            for space in piece.possible_moves:
+                if space not in intersect:
+                    piece.possible_moves.pop(space)
+
+        # Check for checkmate
+        board.check_end(True)
+
+
+    def check_end(self, state: bool) -> None:
         """
-        Check the moves of the current player, if they cannot make any move then return true
+        Check the moves of the current player, if they have no moves then it's either a stalemate or checkmate
+        
+        state: True for checkmate, False for stalemate
         """
 
         pieces = self.white_pieces if self.turn else self.black_pieces
         for piece in pieces:
             if piece.possible_moves:
-                return False
-        return True
+                return
+        
+        if state:
+            return board.end_screen("checkmate")
+        return board.end_screen("stalemate")
     
     def convert_space_to_array_index(self, move):
         def char_range(c1, c2):
@@ -171,9 +208,9 @@ class Board:
              
 
 class Piece:
-    def __init__(self, color, space):
+    def __init__(self, colour, space):
         # True for white, False for black
-        self.colour = color
+        self.colour = colour
         # tuple
         self.space = space
         self.possible_moves = {}
@@ -255,8 +292,6 @@ class Pawn(Piece):
                         self.possible_moves[terminal_space[0]+direction, terminal_space[1]-1] = board.get_space(terminal_space)
                     elif board.get_space(terminal_space[0], terminal_space[1]+1) is self:
                         self.possible_moves[terminal_space[0]+direction, terminal_space[1]+1] = board.get_space(terminal_space)
-
-        # need to implement pawn promotion
 
 class Rook(Piece):
     
@@ -378,8 +413,7 @@ class King(Piece):
     
     def __repr__(self):
         return 'k'
-    
-    # Need to restrict moves so that Player can't move into a check
+
     def calculate_possible_moves(self, board):
         self.possible_moves.clear()
         directions = [(-1, -1), (-1, 0), (-1, 1),
