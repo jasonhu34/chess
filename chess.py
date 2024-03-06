@@ -1,33 +1,52 @@
 """
 NOTES:
 - I wonder if there is some kind of way to "watch" spaces, such that an object is affiliated with a space if it is watching it and we can return a list of watchers
-- Should modify the Board class such that the __init__ accepts a 2d array so that instantiating differnt board states is possible
 - In the check_board() function, "if king.possible_moves" might need to be removed in order to run in_check()
 - Need to develop end_screen()
 - In ply(), need to restrict moves that expose king to check
 - Implement pawn promotion
 - Need to restrict the king from walking into a check
 - Need to develop test cases
+- In pieces, the equality function may be changed to check address's instead
+- When calculating possible moves, maybe keep all the spaces and then in ply() we just don't accept the spaces that 
+    hold pieces of the same colour, this way we can determine if a king can't capture a piece, easily
+    Or maybe it'll be faster to save the game state, calculate possible moves and see if king is capturable by a piece
 """
 
 from typing import Union
 
 class Board:
-    def __init__(self):
-        # Instantiate player pieces
-        pieces = [Rook, Bishop, Knight, Queen, King, Knight, Bishop, Rook]
-        self.black_pieces = [x(False, (0, y)) for x,y in zip(pieces, [x for x in range(8)])] + [Pawn(False, (1, x)) for x in range(8)]
-        self.white_pieces = [x(True, (7, y)) for x,y in zip(pieces, [x for x in range(8)])] + [Pawn(True, (6, x)) for x in range(8)]
-        self.black_king = self.black_pieces[4]
-        self.white_king = self.white_pieces[4]
-
-        # 2D array representing the chess board at move 0
-        self.chess_board = [["-" for x in range(8)] for y in range(8)]
-        self.chess_board[0] = self.black_pieces[:8]
-        self.chess_board[1] = self.black_pieces[8:]
-        self.chess_board[6] = self.white_pieces[8:]
-        self.chess_board[7] = self.white_pieces[:8]
+    def __init__(self, white_pieces=[], black_pieces=[]):
         
+        # 2D array representing the chess board at move 0, default
+        self.chess_board = [["-" for x in range(8)] for y in range(8)]
+        self.black_pieces = black_pieces
+        self.white_pieces = white_pieces
+        self.black_king = None
+        self.white_king = None
+
+        # Instantiate player pieces
+        if not black_pieces:
+            pieces = [Rook, Bishop, Knight, Queen, King, Knight, Bishop, Rook]
+            self.black_pieces = [x(False, (0, y)) for x,y in zip(pieces, [x for x in range(8)])] + [Pawn(False, (1, x)) for x in range(8)] if not black_pieces else black_pieces
+            self.white_pieces = [x(True, (7, y)) for x,y in zip(pieces, [x for x in range(8)])] + [Pawn(True, (6, x)) for x in range(8)] if not white_pieces else white_pieces
+            self.black_king = self.black_pieces[4]
+            self.white_king = self.white_pieces[4]
+
+            self.chess_board[0] = self.black_pieces[:8]
+            self.chess_board[1] = self.black_pieces[8:]
+            self.chess_board[6] = self.white_pieces[8:]
+            self.chess_board[7] = self.white_pieces[:8]
+        else:
+            for piece in black_pieces + white_pieces:
+                self.chess_board[piece.space[0]][piece.space[1]] = piece
+
+                if type(piece) == King:
+                    if piece.colour:
+                        self.white_king = piece
+                    else:
+                        self.black_king = piece
+
         # List containing the moves taken during the game, format is '[Initial space: tuple][Piece: Piece][Captured: str][Terminal space: tuple]'
         self.moves = []
         # True for white, False for black
@@ -84,7 +103,7 @@ class Board:
         # Find the spaces that pieces can land on to get out of check
         spaces = {targetting_piece.space}
         if type(targetting_piece) != Knight:
-            while (board.get_space(direction[0], direction[1]) == '-'):
+            while (self.get_space(direction[0], direction[1]) == '-'):
                 spaces.add((king.space[0]+direction[0], king.space[1]+direction[1]))
                 direction[0] += sign_x
                 direction[1] += sign_y
@@ -97,7 +116,7 @@ class Board:
                     piece.possible_moves.pop(space)
 
         # Check for checkmate
-        board.check_end(True)
+        self.check_end(True)
 
 
     def check_end(self, state: bool) -> None:
@@ -113,8 +132,8 @@ class Board:
                 return
         
         if state:
-            return board.end_screen("checkmate")
-        return board.end_screen("stalemate")
+            return self.end_screen("checkmate")
+        return self.end_screen("stalemate")
     
     def convert_space_to_array_index(self, move):
         def char_range(c1, c2):
@@ -201,11 +220,13 @@ class Board:
         return False
 
     def update_all_possible_moves(self) -> None:
-        for piece in self.black_pieces:
-            piece.calculate_possible_moves(self)
-        for piece in self.white_pieces:
-            piece.calculate_possible_moves(self)
-             
+        if self.turn:
+            for piece in self.white_pieces:
+                piece.calculate_possible_moves(self)
+        else:
+            for piece in self.black_pieces:
+                piece.calculate_possible_moves(self)
+                
 
 class Piece:
     def __init__(self, colour, space):
@@ -416,6 +437,7 @@ class King(Piece):
 
     def calculate_possible_moves(self, board):
         self.possible_moves.clear()
+        opponent_pieces = board.black_pieces if board.turn else board.white_pieces
         directions = [(-1, -1), (-1, 0), (-1, 1),
                      (0, -1), (0, 1),
                      (1, -1), (1, 0), (1, 1)]
@@ -433,15 +455,19 @@ class King(Piece):
                     self.possible_moves[(x, y)] = board.get_space(x, y)
 
 
-board = Board()
+def main():
+    white_pieces = [Queen(True, (6,1)), King(True, (7,1)), Rook(True, (1,1)), Bishop(True, (7,5)), Pawn(True, (5,5)), Pawn(True, (5,6)), Pawn(True, (6,7))]
+    black_pieces = [Queen(False, (4,2)), King(False, (7,3)), Rook(False, (6,3)), Rook(False, (0,7)), Pawn(False, (3,1)), Pawn(False, (1,5)), Pawn(False, (2,6)), Pawn(False, (1, 7))]
+    board = Board(white_pieces, black_pieces)
+    board.update_all_possible_moves()
+    board.turn = not board.turn
+    board.update_all_possible_moves()
 
-x, y = 1, 0
-
-print(board.get_space(x, y))
-board.get_space(x, y).calculate_possible_moves(board)
-print(board.get_space(x, y).possible_moves)
-board.display_board()
-
-while True:
-    board.ply()
     board.display_board()
+
+    while True:
+        board.ply()
+        board.display_board()
+
+if __name__ == "__main__":
+    main()
