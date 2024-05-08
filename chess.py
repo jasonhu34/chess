@@ -3,14 +3,20 @@ NOTES:
 - I wonder if there is some kind of way to "watch" spaces, such that an object is affiliated with a space if it is watching it and we can return a list of watchers
 - In the check_board() function, "if king.possible_moves" might need to be removed in order to run in_check()
 - Need to develop end_screen()
-- In ply(), need to restrict moves that expose king to check
 - Implement pawn promotion
 - Need to restrict the king from walking into a check
 - Need to develop test cases
 - In pieces, the equality function may be changed to check address's instead
-- When calculating possible moves, maybe keep all the spaces and then in ply() we just don't accept the spaces that 
-    hold pieces of the same colour, this way we can determine if a king can't capture a piece, easily
-    Or maybe it'll be faster to save the game state, calculate possible moves and see if king is capturable by a piece
+
+- In ply(), need to restrict moves that expose king to check, perhaps we can do this by checking the 8 directions, and if there is their own piece
+    and then the opponents, then depending on the opponents piece, we restrict moves
+
+    Need to look further into this, maybe I was high or something ->
+    In all the calculate_possible_moves() functions, need to include own pieces that block movement so that the
+    king can't capture these pieces
+
+# Need to fix piece blocking, eg pawn move is not restricted when it is blocking queen check
+# Also not detecting checkmate from games like fool's mate
 """
 
 from typing import Union
@@ -27,7 +33,7 @@ class Board:
 
         # Instantiate player pieces
         if not black_pieces:
-            pieces = [Rook, Bishop, Knight, Queen, King, Knight, Bishop, Rook]
+            pieces = [Rook, Knight, Bishop, Queen, King, Knight, Bishop, Rook]
             self.black_pieces = [x(False, (0, y)) for x,y in zip(pieces, [x for x in range(8)])] + [Pawn(False, (1, x)) for x in range(8)] if not black_pieces else black_pieces
             self.white_pieces = [x(True, (7, y)) for x,y in zip(pieces, [x for x in range(8)])] + [Pawn(True, (6, x)) for x in range(8)] if not white_pieces else white_pieces
             self.black_king = self.black_pieces[4]
@@ -63,61 +69,140 @@ class Board:
         # THEN it is a stalemate
 
         king = self.white_king if self.turn else self.black_king
-        pieces = self.black_pieces if self.turn else self.white_pieces
+        self_pieces, pieces = self.white_pieces, self.black_pieces if self.turn else self.black_pieces, self.white_pieces
         targeting_pieces = []
         self.update_all_possible_moves()
 
-        # King has a possible move
-        if king.possible_moves:
-            return
+        # Check for pieces that are blocking checks, if a piece is found, remove illegal moves
+        directions = [(-1, -1), (-1, 0), (-1, 1),
+                     (0, -1), (0, 1),
+                     (1, -1), (1, 0), (1, 1)]
         
-        # Return False if no pieces can capture the king
+        for direction in directions:
+            x = king.space[0] + direction[0]
+            y = king.space[1] + direction[1]
+            blocking_piece = False  # False/Piece object
+            current_space = self.get_space(x, y)
+
+            while not current_space:
+                # Check if space is empty
+                if current_space == '-':
+                    continue
+            
+                # Opposing piece
+                if current_space.colour != king.colour:
+                    # There is a piece blocking the path
+                    if blocking_piece:
+                        # Own piece is blocking check
+                        if blocking_piece.space in current_space.possible_moves:
+
+                            # Pawn/King are safe pieces
+                            if type(current_space) in [Pawn, King]:
+                                break
+
+                            # Pawns get their own special little block
+                            if type(blocking_piece) == Pawn:
+                                # Diagonal
+                                if (direction[0]+direction[1]) % 2 == 0:
+                                    blocking_piece.possible_moves.clear()
+                                    if type(self.get_space(x-direction[0], y-direction[1])):
+                                        blocking_piece.possible_moves[(x, y)] = current_space
+                                    break
+
+                                    # Use this if above doesn't work
+                                    #for space in blocking_piece.possible_moves.copy():
+                                    #    if blocking_piece[space] != current_space:
+                                    #        blocking_piece.pop(space)
+                                # Vertical
+                                elif direction[0]:
+                                    for space in blocking_piece.possible_moves.copy():
+                                        if space[1] != y:
+                                            blocking_piece.possible_moves.pop(space)
+                                # Horizontal
+                                else:
+                                    blocking_piece.possible_moves.clear()
+                                break
+
+                            # If the blocking piece cannot capture the checking piece, then it has no valid moves
+                            if current_space.space not in blocking_piece.possible_moves:
+                                blocking_piece.possible_moves.clear()
+                                break
+
+                            # Blocking piece must be able to capture, so all possible moves should be on the path
+                            blocking_piece.possible_moves.clear()
+                            while (current_space) != king:
+                                blocking_piece.possible_moves[(x, y)] = current_space
+                                x -= direction[0]
+                                y -= direction[1]
+                                current_space = self.get_space(x, y)
+                            blocking_piece.possible_moves.pop(blocking_piece.space)
+                            break
+                        # Case 1: The blocking piece is own piece and opposing piece is not a check threat
+                        # Case 2: The blocking piece is a capturable piece, need to check if capturing leads to a check
+                        else:
+                            if blocking_piece.colour == king.colour:
+                                break
+                            # Diagonal
+                            if (direction[0] + direction[1]) % 2 == 0:
+                                if type(current_space) in [Queen, Bishop]:
+                                    king.possible_moves.pop(blocking_piece.space)
+                                elif type(current_space) in [Pawn, King]:
+                                    if self.get_space(x-direction[0], y-direction[1]) == blocking_piece:
+                                        king.possible_moves.pop(blocking_piece.space)
+                            # Horizontal
+                            else:
+                                if type(current_space) in [Queen, Rook]:
+                                   king.possible_moves.pop(blocking_piece)
+                                elif type(current_space) == King:
+                                    if self.get_space(x-direction[0], y-direction[1]) == blocking_piece:
+                                        king.possible_moves.pop(blocking_piece.space)
+                                 
+                                
+                    # There is no piece blocking the path
+                    else:
+                        # check threat
+                        if king.space in current_space.possible_moves:
+                            targeting_pieces.append(current_space)
+                        # Need to check if this capture is safe
+                        elif current_space.space in king.possible_moves:
+                            blocking_piece = current_space
+                            continue
+                        break
+                
+                # Own piece scenario
+                else:
+                    # Not a possible check scenario
+                    if blocking_piece:
+                        break
+                    else:
+                        blocking_piece = current_space
+
+                x += direction[0]
+                y += direction[1]
+                current_space = self.get_space(x, y)
+        
+        # Check for knight checks
         for piece in pieces:
-            if king in piece.possible_moves.values():
+            if type(piece) != Knight:
+                continue
+            if king.space in piece.possible_moves:
                 targeting_pieces.append(piece)
 
         # Stalemate condition
         if not targeting_pieces:
             self.check_end(False)
+            return
 
         # Double check without any king moves is a checkmate
         if len(targeting_pieces) != 1:
-            self.end_screen("checkmate")
+            for piece in self_pieces:
+                    if type(piece) == King:
+                        continue
+                    piece.possible_moves.clear()
+            if not king.possible_moves:
+                self.end_screen("checkmate")
         else:
             self.in_check(king, targeting_pieces[0])
-        
-    def in_check(self, king: object, targetting_piece: object) -> bool:
-        """"
-        Remove moves from player such that the only moves that can be made are ones that get out of check
-        """
-        # The pieces of the player that is in check
-        pieces = self.white_pieces if king.colour else self.black_pieces
-
-        # Establish which direction the targetting piece is relative to the king.
-        direction = [targetting_piece.space[0]-king.space[0], targetting_piece.space[1]-king.space[1]]
-        sign_x = -1 if direction[0] < 0 else 1
-        sign_y = -1 if direction[1] < 0 else 1
-        direction[0] = sign_x if direction[0] else 0
-        direction[1] = sign_y if direction[1] else 0
-
-        # Find the spaces that pieces can land on to get out of check
-        spaces = {targetting_piece.space}
-        if type(targetting_piece) != Knight:
-            while (self.get_space(direction[0], direction[1]) == '-'):
-                spaces.add((king.space[0]+direction[0], king.space[1]+direction[1]))
-                direction[0] += sign_x
-                direction[1] += sign_y
-
-        # Remove moves from all pieces that don't get out of check
-        for piece in pieces:
-            intersect = spaces.intersection(piece.possible_moves)
-            for space in piece.possible_moves:
-                if space not in intersect:
-                    piece.possible_moves.pop(space)
-
-        # Check for checkmate
-        self.check_end(True)
-
 
     def check_end(self, state: bool) -> None:
         """
@@ -132,8 +217,8 @@ class Board:
                 return
         
         if state:
-            return self.end_screen("checkmate")
-        return self.end_screen("stalemate")
+            self.end_screen("checkmate")
+        self.end_screen("stalemate")
     
     def convert_space_to_array_index(self, move):
         def char_range(c1, c2):
@@ -161,6 +246,15 @@ class Board:
         else:
             display stalemate
         """
+
+        from sys import exit
+
+        if condition == "checkmate":
+            print("{self.turn} has checkmate!".format())
+        else:
+            print("Stalemate!")
+        
+        exit()
     
     def get_space(self, x: int, y: int) -> Union[object, str]:
         # return the chess piece at space xy if space is valid, else return '-'  
@@ -168,6 +262,50 @@ class Board:
             return ""
         
         return self.chess_board[x][y]
+    
+    # I think that there could be an early exit if the targeting piece is a knight
+    ###############################################################
+    def in_check(self, king: object, targetting_piece: object) -> None:
+        """"
+        Remove moves from player such that the only moves that can be made are ones that get out of check
+        """
+        # The pieces of the player that is in check
+        pieces = self.white_pieces if king.colour else self.black_pieces
+        pieces.remove(king)
+
+        if type(targetting_piece) == Knight:
+            for piece in pieces:
+                if targetting_piece.space in piece.possible_moves:
+                    piece.possible_moves.clear()
+                    piece.possible_moves[targetting_piece.space] = targetting_piece
+                else:
+                    piece.possible_moves.clear()
+            self.check_end(True)
+            return
+
+        # Establish which direction the targetting piece is relative to the king.
+        direction = [targetting_piece.space[0]-king.space[0], targetting_piece.space[1]-king.space[1]]
+        sign_x = -1 if direction[0] < 0 else 1
+        sign_y = -1 if direction[1] < 0 else 1
+        direction[0] = sign_x if direction[0] else 0
+        direction[1] = sign_y if direction[1] else 0
+
+        # Find the spaces that pieces can land on to get out of check
+        spaces = {targetting_piece.space}
+        while (self.get_space(direction[0], direction[1]) == '-'):
+            spaces.add((king.space[0]+direction[0], king.space[1]+direction[1]))
+            direction[0] += sign_x
+            direction[1] += sign_y
+
+        # Remove moves from all pieces that don't get out of check
+        for piece in pieces:
+            intersect = spaces.intersection(piece.possible_moves)
+            for space in piece.possible_moves:
+                if space not in intersect:
+                    piece.possible_moves.pop(space)
+
+        # Check for checkmate
+        self.check_end(True)
     
     def ply(self) -> None:
         """
@@ -263,8 +401,12 @@ class Piece:
 
 class Pawn(Piece):
 
+    def __init__(self, colour, space):
+        super().__init__(colour, space)
+        self.__str_repr = "♙" if self.colour else "♟︎"
+
     def __str__(self):
-        return 'p'
+        return self.__str_repr
     
     def __repr__(self):
         return 'p'
@@ -316,8 +458,12 @@ class Pawn(Piece):
 
 class Rook(Piece):
     
+    def __init__(self, colour, space):
+        super().__init__(colour, space)
+        self.__str_repr = "♖" if self.colour else "♜"
+
     def __str__(self):
-        return 'r'
+        return self.__str_repr
 
     def __repr__(self):
         return 'r'
@@ -344,8 +490,12 @@ class Rook(Piece):
 
 class Bishop(Piece):
     
+    def __init__(self, colour, space):
+        super().__init__(colour, space)
+        self.__str_repr = "♗" if self.colour else "♝"
+
     def __str__(self):
-        return 'b'
+        return self.__str_repr
     
     def __repr__(self):
         return 'b'
@@ -372,8 +522,12 @@ class Bishop(Piece):
 
 class Knight(Piece):
     
+    def __init__(self, colour, space):
+        super().__init__(colour, space)
+        self.__str_repr = "♘" if self.colour else "♞"
+
     def __str__(self):
-        return 'n'
+        return self.__str_repr
     
     def __repr__(self):
         return 'n'
@@ -399,8 +553,12 @@ class Knight(Piece):
 
 class Queen(Piece):
     
+    def __init__(self, colour, space):
+        super().__init__(colour, space)
+        self.__str_repr = "♕" if self.colour else "♛"
+
     def __str__(self):
-        return 'q'
+        return self.__str_repr
     
     def __repr__(self):
         return 'q'
@@ -429,8 +587,12 @@ class Queen(Piece):
 
 class King(Piece):
     
+    def __init__(self, colour, space):
+        super().__init__(colour, space)
+        self.__str_repr = "♔" if self.colour else "♚"
+
     def __str__(self):
-        return 'k'
+        return self.__str_repr
     
     def __repr__(self):
         return 'k'
@@ -454,20 +616,33 @@ class King(Piece):
                 elif board.get_space(x, y).colour != self.colour:
                     self.possible_moves[(x, y)] = board.get_space(x, y)
 
+        # Check king valid king spaces
+        for piece in opponent_pieces:
+            if not len(self.possible_moves):
+                break
+            for move in piece.possible_moves:
+                if move in self.possible_moves:
+                    self.possible_moves.pop(move)
+
 
 def main():
-    white_pieces = [Queen(True, (6,1)), King(True, (7,1)), Rook(True, (1,1)), Bishop(True, (7,5)), Pawn(True, (5,5)), Pawn(True, (5,6)), Pawn(True, (6,7))]
+
+    """white_pieces = [Queen(True, (6,1)), King(True, (7,1)), Rook(True, (1,1)), Bishop(True, (7,5)), Pawn(True, (5,5)), Pawn(True, (5,6)), Pawn(True, (6,7))]
     black_pieces = [Queen(False, (4,2)), King(False, (7,3)), Rook(False, (6,3)), Rook(False, (0,7)), Pawn(False, (3,1)), Pawn(False, (1,5)), Pawn(False, (2,6)), Pawn(False, (1, 7))]
     board = Board(white_pieces, black_pieces)
     board.update_all_possible_moves()
     board.turn = not board.turn
     board.update_all_possible_moves()
 
-    board.display_board()
+    board.display_board()"""
+
+    board = Board()
 
     while True:
-        board.ply()
         board.display_board()
+        board.update_all_possible_moves()
+        board.ply()
+        
 
 if __name__ == "__main__":
     main()
