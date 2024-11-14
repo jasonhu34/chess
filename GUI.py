@@ -6,12 +6,20 @@ todo
 - Output the PGN of the game 
     - Possibly use PGN to start games too
 - Some kind of restart feature
+
+- ADD: Menu for pawn promotion
+- ADD: Menu for end screen + restart
+- FUTURE: Start menu for local, lan, ai
 """
 
 import pygame
 from pygame.locals import *
 from sys import exit
 from typing import Union
+
+class Menu:
+    def __init__(self):
+        pass
 
 class Board:
     def __init__(self, white_pieces=[], black_pieces=[]):
@@ -52,8 +60,8 @@ class Board:
 
         # Displayed chess board
         self.visual_chess_board = pygame.Surface((800, 800))
-        light_space = pygame.image.load("Light_Space.png")
-        dark_space = pygame.image.load("Dark_Space.png")
+        light_space = pygame.image.load("chess\Light_Space.png")
+        dark_space = pygame.image.load("chess\Dark_Space.png")
         for y in range(0, 701, 100):
             for x in range(0, 701, 100):
                 if (x+y)/100%2:
@@ -211,9 +219,9 @@ class Board:
         # Double check without any king moves is a checkmate
         if len(targeting_pieces) != 1:
             for piece in self_pieces:
-                    if type(piece) == King:
-                        continue
-                    piece.possible_moves.clear()
+                if type(piece) == King:
+                    continue
+                piece.possible_moves.clear()
             if not king.possible_moves:
                 self.end_screen("checkmate")
         else:
@@ -311,6 +319,7 @@ class Board:
         pieces = pieces.copy()
         pieces.remove(king)
 
+        # Knight checks can only be resolved by moving the king or capturing the knight
         if type(targetting_piece) == Knight:
             for piece in pieces:
                 if targetting_piece.space in piece.possible_moves:
@@ -322,14 +331,24 @@ class Board:
             return
 
         # Establish which direction the targetting piece is relative to the king.
-        # Change with a function that can check sign
+        ## Change with a function that can check sign
         direction = [targetting_piece.space[0]-king.space[0], targetting_piece.space[1]-king.space[1]]
         direction[0] = int(direction[0]/abs(direction[0])) if direction[0] else 0
         direction[1] = int(direction[1]/abs(direction[1])) if direction[1] else 0
         sign_x = direction[0]
         sign_y = direction[1]
+
+        ## Dirty method that adds a lot of overhead, would def plan it out differently to avoid this
+        # King cannot move backwords on the line of attack
+        temp_board: Board = Board([targetting_piece])
+        temp_board.update_all_possible_moves()
+        back_space = (king.space[0]-direction[0], king.space[1]-direction[1])
+        if (back_space in king.possible_moves and back_space in temp_board.white_pieces[0].possible_moves):
+            king.possible_moves.pop(back_space)
+        del temp_board
+        del back_space
         
-        # Find the spaces that pieces can land on to get out of check
+        # Find the spaces that pieces can land on to get out of check / block the attacking piece
         spaces = {targetting_piece.space}
         while (self.get_space(king.space[0]+direction[0], king.space[1]+direction[1]) == '-'):
             spaces.add((king.space[0]+direction[0], king.space[1]+direction[1]))
@@ -343,6 +362,13 @@ class Board:
             for move in intersect:
                 temp_possible_moves[move] = piece.possible_moves[move]
             piece.possible_moves = temp_possible_moves.copy()
+
+            # Pawn has special case, because of possible 'x' moves
+            if type(piece) != Pawn:
+                continue
+            for move in temp_possible_moves:
+                if temp_possible_moves[move] == 'x':
+                    piece.possible_moves.pop(move)
             #for move in piece.possible_moves.copy():
             #    if move not in intersect:
             #        piece.possible_moves.pop(move)
@@ -372,18 +398,22 @@ class Board:
             return
         
         # Play pick up piece sfx
-        pygame.mixer.music.load("Pick_Up.wav")
+        pygame.mixer.music.load("chess\Pick_Up.wav")
         pygame.mixer.music.play()
         
         # Create chess board that displays the pieces possible moves
         visualized_moves = self.visual_chess_board.copy()
         """pygame.Surface((800, 800))
         visualized_moves.blit(self.visual_chess_board, (0, 0))"""
-        dot = pygame.image.load("Dot.png")
-        circle = pygame.image.load("Circle.png")
+        dot = pygame.image.load("chess\Dot.png")
+        circle = pygame.image.load("chess\Circle.png")
+
+        # Hide pawn diagonal non-captures, as it's not a valid move, only used for logic calculations
         for move in user_piece.possible_moves:
             if user_piece.possible_moves[move] == "-":
                 visualized_moves.blit(dot, (move[1]*100, move[0]*100))
+            elif user_piece.possible_moves[move] == 'x':
+                continue
             else:
                 visualized_moves.blit(circle, (move[1]*100, move[0]*100))
 
@@ -406,7 +436,7 @@ class Board:
                     if (int(event.pos[1]/100), int(event.pos[0]/100)) not in user_piece.possible_moves:
                         return
                     
-                    pygame.mixer.music.load("Put_Down.wav")
+                    pygame.mixer.music.load("chess\Put_Down.wav")
                     pygame.mixer.music.play()
                     user_piece.move(self, (int(event.pos[1]/100), int(event.pos[0]/100)))
                     self.turn = not self.turn
@@ -445,7 +475,7 @@ class Piece:
         self.space = space
         self.possible_moves = {}
         self.starting_space = space     # In theory, should be a private variable
-        self.image = pygame.image.load("White_{}.png".format(str(self))) if self.colour else pygame.image.load("Black_{}.png".format(str(self))) # The image representation
+        self.image = pygame.image.load("chess\White_{}.png".format(str(self))) if self.colour else pygame.image.load("chess\Black_{}.png".format(str(self))) # The image representation
     
     def move(self, board: Board, terminal_space: tuple) -> None:
         # move/capture to space on board
@@ -512,6 +542,8 @@ class Pawn(Piece):
                 # Check if the opponent's piece is on the space
                 if board.get_space(self.space[0]+direction, self.space[1]+y) != '-' and board.get_space(self.space[0]+direction, self.space[1]+y).colour != self.colour:
                     self.possible_moves[self.space[0]+direction, self.space[1]+y] = board.get_space(self.space[0]+direction, self.space[1]+y)
+                else:
+                    self.possible_moves[self.space[0]+direction, self.space[1]+y] = 'x'
 
         # En passent
         # Check if board moves is non-empty (subscriptable)
@@ -534,7 +566,15 @@ class Pawn(Piece):
         
     def move(self, board: Board, terminal_space: tuple) -> None:
         captured = 'x' if self.possible_moves[terminal_space] != '-' else ''
+
+        # This is not a valid move, just for logic
+        # Comes from ply, so have to negate turn again in order to have the correct turn order
+        if self.possible_moves[terminal_space] == 'x':
+            board.turn = not board.turn
+            return
+
         # Promotion
+        ## Change this for gui, need to add a menu like interface for this
         if terminal_space[0] in [0, 7]:
             while True:
                 promotion_piece = input("Promote pawn to (q, r, b, n): ")
@@ -756,11 +796,13 @@ class King(Piece):
         empty_spaces = {move for move in self.possible_moves if self.possible_moves[move] != '-'}
         for piece in opponent_pieces:
             if empty_spaces:
-                temp_board = Board([piece.copy()])
-                temp_board.white_pieces[0].calculate_possible_moves(temp_board)
-                for move in empty_spaces.intersection(temp_board.white_pieces[0].possible_moves):
+                # temp_board = Board([piece.copy()])
+                # temp_board.white_pieces[0].calculate_possible_moves(temp_board)
+                # for move in empty_spaces.intersection(temp_board.white_pieces[0].possible_moves):
+                for move in empty_spaces.intersection(piece.possible_moves):
                     self.possible_moves.pop(move)
                     empty_spaces.remove(move)
+            # Doesn't work because piece.possible_moves does not count blocking piece spaces as a possible move
             for move in (self.possible_moves.keys()-empty_spaces).intersection(piece.possible_moves):
                 self.possible_moves.pop(move)
 
@@ -829,7 +871,7 @@ def main():
     pygame.event.set_blocked(KEYUP)
     
     FPS = pygame.time.Clock()
-    FPS.tick(24)
+    FPS.tick(12)
 
     # Screen information
     SCREEN_DIMENSION = 800
