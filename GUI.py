@@ -6,12 +6,15 @@ todo
 - Output the PGN of the game 
     - Possibly use PGN to start games too
 - Some kind of restart feature
+- implement dynamic sizing, so that it the user can resize
 
+- Fix: en passents
 - ADD: Menu for pawn promotion
 - ADD: Menu for end screen + restart
 - FUTURE: Start menu for local, lan, ai
 """
 
+from os import path
 import pygame
 from pygame.locals import *
 from sys import exit
@@ -23,6 +26,10 @@ class Menu:
 
 class Board:
     def __init__(self, white_pieces=[], black_pieces=[]):
+        # should be a little bit less than 1/8 either the width or height of the screen, whichever is smallest
+        self.SIZE = int(min(pygame.display.Info().current_h, pygame.display.Info().current_w) / 8)
+        # Maybe it's better to just initialize the display surface here, but I'll go with a setter
+        self.DISPLAYSURF = None
         
         # 2D array representing the chess board at move 0, default
         self.chess_board = [["-" for x in range(8)] for y in range(8)]
@@ -59,12 +66,14 @@ class Board:
         self.turn = True
 
         # Displayed chess board
-        self.visual_chess_board = pygame.Surface((800, 800))
-        light_space = pygame.image.load("chess\Light_Space.png")
-        dark_space = pygame.image.load("chess\Dark_Space.png")
-        for y in range(0, 701, 100):
-            for x in range(0, 701, 100):
-                if (x+y)/100%2:
+        self.visual_chess_board = pygame.Surface((self.SIZE * 8, self.SIZE * 8))
+        light_space = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Light_Space.png"))
+        light_space = pygame.transform.scale(light_space, (self.SIZE, self.SIZE))
+        dark_space = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Dark_Space.png"))
+        dark_space = pygame.transform.scale(dark_space, (self.SIZE, self.SIZE))
+        for y in range(0, self.SIZE*7+1, self.SIZE):
+            for x in range(0, self.SIZE*7+1, self.SIZE):
+                if (x+y)/self.SIZE%2:
                     self.visual_chess_board.blit(dark_space, (x, y))
                 else:
                     self.visual_chess_board.blit(light_space, (x, y))
@@ -254,8 +263,8 @@ class Board:
         column = {x:y for x,y in zip([a for a in char_range('a','h')], [b for b in range(9)])}
         return row[int(move[1])], column[move[0]]
 
-    def display_board(self, surface: pygame.SurfaceType, new_board: pygame.SurfaceType = None, moving_piece = None) -> None:
-        surface.blit(self.visual_chess_board if new_board == None else new_board, (0,0))
+    def display_board(self, new_board: pygame.SurfaceType = None, moving_piece = None) -> None:
+        self.DISPLAYSURF.blit(self.visual_chess_board if new_board == None else new_board, (0,0))
         index = -1
         if moving_piece != None:
             if moving_piece.colour:
@@ -266,9 +275,9 @@ class Board:
                 self.black_pieces.remove(moving_piece)
         
         for piece in self.white_pieces:
-            surface.blit(piece.image, (piece.space[1]*100, piece.space[0]*100))
+            self.DISPLAYSURF.blit(piece.image, (piece.space[1]*self.SIZE, piece.space[0]*self.SIZE))
         for piece in self.black_pieces:
-            surface.blit(piece.image, (piece.space[1]*100, piece.space[0]*100))
+            self.DISPLAYSURF.blit(piece.image, (piece.space[1]*self.SIZE, piece.space[0]*self.SIZE))
 
         if index == -1:
             return
@@ -383,14 +392,14 @@ class Board:
         # Check for checkmate
         self.check_end(True)
     
-    def ply(self, surface, pos: tuple) -> None:
+    def ply(self, pos: tuple) -> None:
         ## UI
         """
         pos: (x, y) on pygame surface
         """
         # The player has to pick a piece that belongs to them
         user_piece = None
-        pos = (int(pos[0]/100), int(pos[1]/100))
+        pos = (int(pos[0]/self.SIZE), int(pos[1]/self.SIZE))
         user_piece = self.get_space(pos[1], pos[0])
         if user_piece == "-":
             return
@@ -398,51 +407,53 @@ class Board:
             return
         
         # Play pick up piece sfx
-        pygame.mixer.music.load("chess\Pick_Up.wav")
+        pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "Pick_Up.wav"))
         pygame.mixer.music.play()
         
         # Create chess board that displays the pieces possible moves
         visualized_moves = self.visual_chess_board.copy()
-        """pygame.Surface((800, 800))
-        visualized_moves.blit(self.visual_chess_board, (0, 0))"""
-        dot = pygame.image.load("chess\Dot.png")
-        circle = pygame.image.load("chess\Circle.png")
+        dot = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Dot.png"))
+        dot = pygame.transform.smoothscale(dot, (self.SIZE, self.SIZE))
+        circle = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Circle.png"))
+        circle = pygame.transform.smoothscale(circle, (self.SIZE, self.SIZE))
 
         # Hide pawn diagonal non-captures, as it's not a valid move, only used for logic calculations
         for move in user_piece.possible_moves:
             if user_piece.possible_moves[move] == "-":
-                visualized_moves.blit(dot, (move[1]*100, move[0]*100))
+                visualized_moves.blit(dot, (move[1]*self.SIZE, move[0]*self.SIZE))
             elif user_piece.possible_moves[move] == 'x':
                 continue
             else:
-                visualized_moves.blit(circle, (move[1]*100, move[0]*100))
+                visualized_moves.blit(circle, (move[1]*self.SIZE, move[0]*self.SIZE))
 
         # To immediately show possible moves
-        self.display_board(surface, visualized_moves)
+        self.display_board(visualized_moves)
         pygame.display.update()
         while True:
             for event in pygame.event.get():
                 ## Has not implemented not intended behaviour like exiting window, resizing, etc.
-                print(event)
 
                 if event.type == MOUSEMOTION:
-                    self.display_board(surface, visualized_moves, user_piece)
+                    self.display_board(visualized_moves, user_piece)
                     # Size of each png is 100x100, so center the image on cursor using 50
-                    surface.blit(user_piece.image, (event.pos[0]-user_piece.image.get_rect().width/2, event.pos[1]-user_piece.image.get_rect().height/2))
+                    self.DISPLAYSURF.blit(user_piece.image, (event.pos[0]-user_piece.image.get_rect().width/2, event.pos[1]-user_piece.image.get_rect().height/2))
 
                 elif event.type == MOUSEBUTTONUP:
                     if event.button != 1:
                         continue
-                    if (int(event.pos[1]/100), int(event.pos[0]/100)) not in user_piece.possible_moves:
+                    if (int(event.pos[1]/self.SIZE), int(event.pos[0]/self.SIZE)) not in user_piece.possible_moves:
                         return
                     
-                    pygame.mixer.music.load("chess\Put_Down.wav")
+                    pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "Put_Down.wav"))
                     pygame.mixer.music.play()
-                    user_piece.move(self, (int(event.pos[1]/100), int(event.pos[0]/100)))
+                    user_piece.move(self, (int(event.pos[1]/self.SIZE), int(event.pos[0]/self.SIZE)))
                     self.turn = not self.turn
                     return
                 
                 pygame.display.update()
+
+    def set_display_surf(self, surf: pygame.SurfaceType):
+        self.DISPLAYSURF = surf
 
     def space_in_bounds(self, space: tuple) -> bool:
         if 0 <= space[0] <= 7 and 0 <= space[1] <= 7:
@@ -475,11 +486,20 @@ class Piece:
         self.space = space
         self.possible_moves = {}
         self.starting_space = space     # In theory, should be a private variable
-        self.image = pygame.image.load("chess\White_{}.png".format(str(self))) if self.colour else pygame.image.load("chess\Black_{}.png".format(str(self))) # The image representation
-    
+        # The image representation
+        self.image = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "White_{}.png").format(str(self))) if self.colour else pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Black_{}.png").format(str(self))) 
+        size = int(min(pygame.display.Info().current_h, pygame.display.Info().current_w) / 8)
+        self.image = pygame.transform.smoothscale(self.image, (size, size))
+
     def move(self, board: Board, terminal_space: tuple) -> None:
         # move/capture to space on board
         captured = ''
+
+        # This is not a valid move, just for logic
+        # Comes from ply, so have to negate turn again in order to have the correct turn order
+        if self.possible_moves[terminal_space] == 'x':
+            board.turn = not board.turn
+            return
 
         if self.possible_moves[terminal_space] != '-':
             captured = 'x'
@@ -540,27 +560,23 @@ class Pawn(Piece):
             # Validate space
             if board.get_space(self.space[0]+direction, self.space[1]+y):
                 # Check if the opponent's piece is on the space
-                if board.get_space(self.space[0]+direction, self.space[1]+y) != '-' and board.get_space(self.space[0]+direction, self.space[1]+y).colour != self.colour:
-                    self.possible_moves[self.space[0]+direction, self.space[1]+y] = board.get_space(self.space[0]+direction, self.space[1]+y)
+                current_space = board.get_space(self.space[0]+direction, self.space[1]+y)
+                if current_space != '-' and current_space.colour != self.colour:
+                    self.possible_moves[self.space[0]+direction, self.space[1]+y] = current_space
                 else:
                     self.possible_moves[self.space[0]+direction, self.space[1]+y] = 'x'
 
         # En passent
-        # Check if board moves is non-empty (subscriptable)
-        if not board.moves:
-            return
-        if type(board.moves[-1][1]) != Pawn:
+        # If the last ply was NOT a pawn move, then en passent is not possible
+        if type(not board.moves or board.moves[-1][1]) != Pawn:
             return
         initial_space = board.moves[-1][0]
         terminal_space = board.moves[-1][3]
         # Check if pawn moved two spaces
         if abs(initial_space[0]-terminal_space[0]) != 2:
             return
-        if board.moves[-1][1] is self:
-            return
-
-        for direction in [-1, 1]:
-            if board.get_space(terminal_space[0], terminal_space[1]+direction) is self:
+        for dir in [-1, 1]:
+            if board.get_space(terminal_space[0], terminal_space[1]+dir) is self:
                 ## Fix where enpassent ends up
                 self.possible_moves[terminal_space[0]+direction, terminal_space[1]] = board.get_space(terminal_space[0], terminal_space[1])
         
@@ -574,66 +590,97 @@ class Pawn(Piece):
             return
 
         # Promotion
-        ## Change this for gui, need to add a menu like interface for this
         if terminal_space[0] in [0, 7]:
-            while True:
-                promotion_piece = input("Promote pawn to (q, r, b, n): ")
-                if promotion_piece == 'q':
-                    promotion_piece = Queen(self.colour, terminal_space)
-                    break
-                elif promotion_piece == 'r':
-                    promotion_piece = Rook(self.colour, terminal_space)
-                    break
-                elif promotion_piece == 'b':
-                    promotion_piece = Bishop(self.colour, terminal_space)
-                    break
-                elif promotion_piece == 'n':
-                    promotion_piece = Knight(self.colour, terminal_space)
-                    break
-                else:
-                    continue
-
-            if self.colour:
-                board.white_pieces.remove(self)
-                board.white_pieces.append(promotion_piece)
-            else:
-                board.black_pieces.remove(self)
-                board.black_pieces.append(promotion_piece)
-            
-            if captured:
-                if self.colour:
-                    board.black_pieces.remove(self.possible_moves[terminal_space])
-                else:
-                    board.white_pieces.remove(self.possible_moves[terminal_space])
-
-            board.moves.append((self.space, self, captured, terminal_space))
-            board.chess_board[terminal_space[0]][terminal_space[1]] = promotion_piece
-            board.chess_board[self.space[0]][self.space[1]] = '-'
+            self.promotion(board, terminal_space)
             return
-            
-        ## Piece.move(), I think it is better to just copy/paste the code here rather than calling the method
+
         # move/capture to space on board
+        super().move(board, terminal_space)
+    
+    def promotion(self, board: Board, terminal_space: tuple):
+        captured = 'x' if self.possible_moves[terminal_space] != '-' else ''
+        menu_rect = None
+        selection = () # point that user has pressed, will be later assigned as (event.pos[0]//board.SIZE, event.pos[1]//board.SIZE)
+        direction = 0 # Opposite from the direction the pawn is moving
+        # white promotion
+        if self.colour:
+            menu = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "white_menu.png"))
+            menu = pygame.transform.smoothscale(menu, (board.SIZE, board.SIZE*4+board.SIZE/5))
+            menu_rect = pygame.Rect(terminal_space[1]*board.SIZE, 0, board.SIZE, board.SIZE*4+board.SIZE/5)
+            board.DISPLAYSURF.blit(menu, (terminal_space[1]*board.SIZE, 0))    
+            direction = 1
+        else:
+            menu = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "black_menu.png"))
+            menu = pygame.transform.smoothscale(menu, (board.SIZE, board.SIZE*4+board.SIZE/5))
+            menu_rect = pygame.Rect(terminal_space[1]*board.SIZE, 4*board.SIZE-board.SIZE/5, board.SIZE, board.SIZE*4+board.SIZE/5)
+            board.DISPLAYSURF.blit(menu, (terminal_space[1]*board.SIZE, 4*board.SIZE-board.SIZE/5))
+            direction = -1
+
+        pygame.display.update()
+
+        flag = True
+        while flag:
+            # Programmed so that the player is allowed to "drag off" so they don't get locked in when pressing m1
+            for event in pygame.event.get():
+                if event.type == MOUSEBUTTONDOWN:
+                    # Have to be left click
+                    if event.button != 1:
+                        continue
+                    if menu_rect.collidepoint(event.pos):
+                        selection = (event.pos[0]//board.SIZE, event.pos[1]//board.SIZE)
+
+                elif event.type == MOUSEBUTTONUP:
+                    if event.button != 1:
+                        continue
+                    if not selection:
+                        continue
+                    # Separate the collisions, due to the size of the cancel promotion button, if it was the same size as a square
+                    # we could just remove the above
+                    if not (selection[0] == event.pos[0]//board.SIZE and selection[1] == event.pos[1]//board.SIZE):
+                        selection = ()
+                        continue
+                    flag = False
+
+                elif event.type == QUIT:
+                    pygame.quit()
+                    exit()
+
+        # From the collision check, we know x coord is valid, so y is the differentiating value
+        # Index the tuples this way due to the way moves are converted to tuples
+        promotion_piece = None
+        if terminal_space[0] == selection[1]:
+            promotion_piece = Queen(self.colour, terminal_space)
+        elif terminal_space[0]+direction == selection[1]:
+            promotion_piece = Bishop(self.colour, terminal_space)
+        elif terminal_space[0]+2*direction == selection[1]:
+            promotion_piece = Knight(self.colour, terminal_space)
+        elif terminal_space[0]+3*direction == selection[1]:
+            promotion_piece = Rook(self.colour, terminal_space)
+        else:
+            # Cancelled promotion
+            board.turn = not board.turn
+            return
+
+        if self.colour:
+            board.white_pieces.remove(self)
+            board.white_pieces.append(promotion_piece)
+        else:
+            board.black_pieces.remove(self)
+            board.black_pieces.append(promotion_piece)
 
         if captured:
-            captured_piece = self.possible_moves[terminal_space]
-            board.chess_board[captured_piece.space[0]][captured_piece.space[1]] = '-' # For en-passent
-
-            if board.turn:
-                board.black_pieces.remove(captured_piece)
+            if self.colour:
+                board.black_pieces.remove(self.possible_moves[terminal_space])
             else:
-                board.white_pieces.remove(captured_piece)
-            
-            """if type(self) == Pawn and self.space[0] == self.possible_moves[terminal_space][0]:
+                board.white_pieces.remove(self.possible_moves[terminal_space])
 
-            if board.turn:
-                board.black_pieces.remove(board.chess_board[terminal_space[0]][terminal_space[1]])
-            else:
-                board.white_pieces.remove(board.chess_board[terminal_space[0]][terminal_space[1]])"""
-        
+        pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "Put_Down.wav"))
+        pygame.mixer.music.play()
         board.moves.append((self.space, self, captured, terminal_space))
-        board.chess_board[terminal_space[0]][terminal_space[1]] = self
+        board.chess_board[terminal_space[0]][terminal_space[1]] = promotion_piece
         board.chess_board[self.space[0]][self.space[1]] = '-'
-        self.space = terminal_space
+        return
+
 
 class Rook(Piece):
     
@@ -662,9 +709,10 @@ class Rook(Piece):
                 y += direction[1]
             
             # Hit an opponents piece
-            if board.get_space(x, y):
-                if board.get_space(x, y).colour != self.colour:
-                    self.possible_moves[(x, y)] = board.get_space(x, y)
+            if not board.get_space(x, y):
+                continue
+
+            self.possible_moves[(x, y)] = board.get_space(x, y) if board.get_space(x, y).colour != self.colour else 'x'
 
 class Bishop(Piece):
     
@@ -694,9 +742,10 @@ class Bishop(Piece):
                 y += direction[1]
             
             # Hit an opponents piece
-            if board.get_space(x, y):
-                if board.get_space(x, y).colour != self.colour:
-                    self.possible_moves[(x, y)] = board.get_space(x, y)
+            if not board.get_space(x, y):
+                continue
+
+            self.possible_moves[(x, y)] = board.get_space(x, y) if board.get_space(x, y).colour != self.colour else 'x'
 
 class Knight(Piece):
     
@@ -720,13 +769,15 @@ class Knight(Piece):
             y = self.space[1] + direction[1]
 
             # Check if space is valid
-            if board.get_space(x, y):
-                # Check if space is empty
-                if board.get_space(x, y) == '-':
-                    self.possible_moves[(x, y)] = '-'
-                # Check if the piece is the opponent's
-                elif board.get_space(x, y).colour != self.colour:
-                    self.possible_moves[(x, y)] = board.get_space(x, y)
+            if not board.get_space(x, y):
+                continue
+            
+            # Check if space is empty
+            if board.get_space(x, y) == '-':
+                self.possible_moves[(x, y)] = '-'
+            else:
+                # Hit an opponents piece
+                self.possible_moves[(x, y)] = board.get_space(x, y) if board.get_space(x, y).colour != self.colour else 'x'
 
 class Queen(Piece):
     
@@ -757,9 +808,10 @@ class Queen(Piece):
                 y += direction[1]
             
             # Hit an opponents piece
-            if board.get_space(x, y):
-                if board.get_space(x, y).colour != self.colour:
-                    self.possible_moves[(x, y)] = board.get_space(x, y)
+            if not board.get_space(x, y):
+                continue
+
+            self.possible_moves[(x, y)] = board.get_space(x, y) if board.get_space(x, y).colour != self.colour else 'x'
 
 class King(Piece):
     
@@ -793,18 +845,12 @@ class King(Piece):
 
         # Check king valid king spaces
         ## Dirty method, change this if optimization is needed
-        empty_spaces = {move for move in self.possible_moves if self.possible_moves[move] != '-'}
         for piece in opponent_pieces:
-            if empty_spaces:
-                # temp_board = Board([piece.copy()])
-                # temp_board.white_pieces[0].calculate_possible_moves(temp_board)
-                # for move in empty_spaces.intersection(temp_board.white_pieces[0].possible_moves):
-                for move in empty_spaces.intersection(piece.possible_moves):
+            for move in (piece.possible_moves):
+                if type(piece) == Pawn and piece.possible_moves[move] == '-':
+                    continue
+                if move in self.possible_moves:
                     self.possible_moves.pop(move)
-                    empty_spaces.remove(move)
-            # Doesn't work because piece.possible_moves does not count blocking piece spaces as a possible move
-            for move in (self.possible_moves.keys()-empty_spaces).intersection(piece.possible_moves):
-                self.possible_moves.pop(move)
 
         # Check for castling
         if self.space != self.starting_space:
@@ -865,7 +911,10 @@ class King(Piece):
 
 def main():
     pygame.init()
-    DISPLAYSURF = pygame.display.set_mode((800, 800))
+    # Sprite sizing is dependent on this being set before the board object is made
+    SIZE = int(min(pygame.display.Info().current_h, pygame.display.Info().current_w) / 8) - 10 # 10 is so that the whole window is visible even with a toolbar
+    DISPLAYSURF = pygame.display.set_mode((SIZE*8, SIZE*8)) 
+    del SIZE
     pygame.display.set_caption("Chess")
     pygame.event.set_blocked(KEYDOWN)
     pygame.event.set_blocked(KEYUP)
@@ -873,22 +922,19 @@ def main():
     FPS = pygame.time.Clock()
     FPS.tick(12)
 
-    # Screen information
-    SCREEN_DIMENSION = 800
-
     board = Board()
+    board.set_display_surf(DISPLAYSURF)
 
     while True:
-        board.display_board(DISPLAYSURF)
+        board.display_board()
         board.check_board()
         pygame.display.update()
 
         event = pygame.event.poll()
-        print(event)
         if event.type == MOUSEBUTTONDOWN:
             if event.button != 1:
                 continue
-            board.ply(DISPLAYSURF, event.pos)
+            board.ply(event.pos)
 
         elif event.type == QUIT:
             pygame.quit()
