@@ -20,10 +20,6 @@ from pygame.locals import *
 from sys import exit
 from typing import Union
 
-class Menu:
-    def __init__(self):
-        pass
-
 class Board:
     def __init__(self, white_pieces=[], black_pieces=[]):
         # should be a little bit less than 1/8 either the width or height of the screen, whichever is smallest
@@ -67,9 +63,9 @@ class Board:
 
         # Displayed chess board
         self.visual_chess_board = pygame.Surface((self.SIZE * 8, self.SIZE * 8))
-        light_space = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Light_Space.png"))
+        light_space = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "Light_Space.png"))
         light_space = pygame.transform.scale(light_space, (self.SIZE, self.SIZE))
-        dark_space = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Dark_Space.png"))
+        dark_space = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "Dark_Space.png"))
         dark_space = pygame.transform.scale(dark_space, (self.SIZE, self.SIZE))
         for y in range(0, self.SIZE*7+1, self.SIZE):
             for x in range(0, self.SIZE*7+1, self.SIZE):
@@ -220,6 +216,21 @@ class Board:
             if king.space in piece.possible_moves:
                 targeting_pieces.append(piece)
 
+        ## Insufficient material, needs to be expanded
+        stalemate = False
+        if len(self.black_pieces) <= 2 and len(self.white_pieces) <= 2:
+            stalemate = True
+            for piece in self.black_pieces + self.white_pieces:
+                if type(piece) not in [King, Knight]:
+                    stalemate = False
+                    break
+
+        if stalemate:
+            for piece in self_pieces:
+                piece.possible_moves.clear()
+            self.check_end(False)
+            return
+
         # Stalemate condition
         if not targeting_pieces:
             self.check_end(False)
@@ -232,7 +243,7 @@ class Board:
                     continue
                 piece.possible_moves.clear()
             if not king.possible_moves:
-                self.end_screen("checkmate")
+                self.check_end(True)
         else:
             self.in_check(king, targeting_pieces[0])
 
@@ -243,14 +254,76 @@ class Board:
         state: True for checkmate, False for stalemate
         """
 
+        # Check if player has any valid moves
         pieces = self.white_pieces if self.turn else self.black_pieces
         for piece in pieces:
             if piece.possible_moves:
                 return
-        
+
+        width = self.DISPLAYSURF.get_width()
+        height = self.DISPLAYSURF.get_height()
+        menu = pygame.Rect(width/8*1.5, height/8*2.5, width/8*5, height/8*3)
+        pygame.draw.rect(self.DISPLAYSURF, (255, 180, 67), menu)
+        pygame.draw.rect(self.DISPLAYSURF, (0, 0, 0), menu, 3)
+        font = pygame.freetype.Font(path.join(path.dirname(path.abspath(__file__)), "fonts", "VCR_OSD_MONO_1.001.ttf"), self.SIZE/4)
+        temp_surf = temp_rect = None
         if state:
-            self.end_screen("checkmate")
-        self.end_screen("stalemate")
+            # As turn is updated before checkmates are checked, the opposite of turn is what we need
+            temp_surf, temp_rect = font.render("Black has checkmate!", (0,0,0)) if self.turn else font.render("White has checkmate!", (0,0,0))
+        else:
+            temp_surf, temp_rect = font.render("Stalemate!", (0,0,0))
+        
+        replay_surf, replay_rect = font.render("Play again", (0,0,0))
+        quit_surf, quit_rect = font.render("Quit", (0,0,0))
+        replay_menu = pygame.Rect(self.SIZE*2, self.SIZE*4, self.SIZE*1.9, self.SIZE)
+        quit_menu = pygame.Rect(self.SIZE*4.1, self.SIZE*4, self.SIZE*1.9, self.SIZE)
+
+        pygame.draw.rect(self.DISPLAYSURF, (255, 200, 80), quit_menu)
+        pygame.draw.rect(self.DISPLAYSURF, (255, 200, 80), replay_menu)
+        pygame.draw.rect(self.DISPLAYSURF, (0, 0, 0), quit_menu, 1)
+        pygame.draw.rect(self.DISPLAYSURF, (0, 0, 0), replay_menu, 1)
+        self.DISPLAYSURF.blit(temp_surf, (menu.centerx-temp_rect.width/2, menu.centery-menu.height/3))
+        self.DISPLAYSURF.blit(replay_surf, (replay_menu.centerx-replay_rect.width/2, replay_menu.centery-replay_rect.height/3))
+        self.DISPLAYSURF.blit(quit_surf, (quit_menu.centerx-quit_rect.width/2, quit_menu.centery-quit_rect.height/3))
+        pygame.display.update()
+        
+        selection = 0 # 0: No selection, 1: play again, 2: quit
+        while True:
+            # Programmed so that the player is allowed to "drag off" so they don't get locked in when pressing m1
+            for event in pygame.event.get():
+                if event.type == MOUSEBUTTONDOWN:
+                    # Have to be left click
+                    if event.button != 1:
+                        continue
+                    if replay_menu.collidepoint(event.pos):
+                        selection = 1
+                    if quit_menu.collidepoint(event.pos):
+                        selection = 2
+
+                elif event.type == MOUSEBUTTONUP:
+                    if event.button != 1:
+                        continue
+                    if not selection:
+                        continue
+                    # Separate the collisions, due to the size of the cancel promotion button, if it was the same size as a square
+                    # we could just remove the above
+                    if replay_menu.collidepoint(event.pos) and selection == 1:
+                        # Play again
+                        temp_surf = self.DISPLAYSURF
+                        self.__init__()
+                        self.set_display_surf(temp_surf)
+                        return
+                    
+                    if quit_menu.collidepoint(event.pos) and selection == 2:
+                        pygame.quit()
+                        exit()
+
+                    selection = 0
+
+                elif event.type == QUIT:
+                    pygame.quit()
+                    exit()
+    
     
     def convert_space_to_array_index(self, move):
         def char_range(c1, c2):
@@ -286,30 +359,6 @@ class Board:
         else:
             self.black_pieces.insert(index, moving_piece)
 
-    def end_screen(self, condition: str) -> None:
-        ## UI
-        """
-        condition: "checkmate" / "stalemate"
-
-        If "checkmate":
-            then display that the current player turn has lost / next player turn has won (!self.turn)
-        else:
-            display stalemate
-        """
-
-        from sys import exit
-
-        if condition == "checkmate":
-            # As turn is updated before checkmates are checked, the opposite of turn is what we need
-            if self.turn:
-                print("Black has checkmate!")
-            else:
-                print("White has checkmate!")
-        else:
-            print("Stalemate!")
-        
-        exit()
-    
     def get_space(self, x: int, y: int) -> Union[object, str]:
         # return the chess piece at space xy if space is valid, else return '-'  
         if not self.space_in_bounds((x, y)):
@@ -407,14 +456,14 @@ class Board:
             return
         
         # Play pick up piece sfx
-        pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "Pick_Up.wav"))
+        pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "audio", "Pick_Up.wav"))
         pygame.mixer.music.play()
         
         # Create chess board that displays the pieces possible moves
         visualized_moves = self.visual_chess_board.copy()
-        dot = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Dot.png"))
+        dot = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "Dot.png"))
         dot = pygame.transform.smoothscale(dot, (self.SIZE, self.SIZE))
-        circle = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Circle.png"))
+        circle = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "Circle.png"))
         circle = pygame.transform.smoothscale(circle, (self.SIZE, self.SIZE))
 
         # Hide pawn diagonal non-captures, as it's not a valid move, only used for logic calculations
@@ -444,7 +493,7 @@ class Board:
                     if (int(event.pos[1]/self.SIZE), int(event.pos[0]/self.SIZE)) not in user_piece.possible_moves:
                         return
                     
-                    pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "Put_Down.wav"))
+                    pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "audio", "Put_Down.wav"))
                     pygame.mixer.music.play()
                     user_piece.move(self, (int(event.pos[1]/self.SIZE), int(event.pos[0]/self.SIZE)))
                     self.turn = not self.turn
@@ -487,7 +536,8 @@ class Piece:
         self.possible_moves = {}
         self.starting_space = space     # In theory, should be a private variable
         # The image representation
-        self.image = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "White_{}.png").format(str(self))) if self.colour else pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "Black_{}.png").format(str(self))) 
+        self.image = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "White_{}.png").format(str(self))) \
+            if self.colour else pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "Black_{}.png").format(str(self))) 
         size = int(min(pygame.display.Info().current_h, pygame.display.Info().current_w) / 8)
         self.image = pygame.transform.smoothscale(self.image, (size, size))
 
@@ -604,13 +654,13 @@ class Pawn(Piece):
         direction = 0 # Opposite from the direction the pawn is moving
         # white promotion
         if self.colour:
-            menu = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "white_menu.png"))
+            menu = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "white_menu.png"))
             menu = pygame.transform.smoothscale(menu, (board.SIZE, board.SIZE*4+board.SIZE/5))
             menu_rect = pygame.Rect(terminal_space[1]*board.SIZE, 0, board.SIZE, board.SIZE*4+board.SIZE/5)
             board.DISPLAYSURF.blit(menu, (terminal_space[1]*board.SIZE, 0))    
             direction = 1
         else:
-            menu = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "black_menu.png"))
+            menu = pygame.image.load(path.join(path.dirname(path.abspath(__file__)), "sprites", "black_menu.png"))
             menu = pygame.transform.smoothscale(menu, (board.SIZE, board.SIZE*4+board.SIZE/5))
             menu_rect = pygame.Rect(terminal_space[1]*board.SIZE, 4*board.SIZE-board.SIZE/5, board.SIZE, board.SIZE*4+board.SIZE/5)
             board.DISPLAYSURF.blit(menu, (terminal_space[1]*board.SIZE, 4*board.SIZE-board.SIZE/5))
@@ -674,7 +724,7 @@ class Pawn(Piece):
             else:
                 board.white_pieces.remove(self.possible_moves[terminal_space])
 
-        pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "Put_Down.wav"))
+        pygame.mixer.music.load(path.join(path.dirname(path.abspath(__file__)), "audio", "Put_Down.wav"))
         pygame.mixer.music.play()
         board.moves.append((self.space, self, captured, terminal_space))
         board.chess_board[terminal_space[0]][terminal_space[1]] = promotion_piece
@@ -843,6 +893,7 @@ class King(Piece):
                 elif board.get_space(x, y).colour != self.colour:
                     self.possible_moves[(x, y)] = board.get_space(x, y)
 
+
         # Check king valid king spaces
         ## Dirty method, change this if optimization is needed
         for piece in opponent_pieces:
@@ -939,8 +990,6 @@ def main():
         elif event.type == QUIT:
             pygame.quit()
             exit()
-
-        
 
 if __name__ == "__main__":
     main()
